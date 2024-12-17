@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conversor dolar/real (PTAX)</title>
+
+  <!-- Bootstrap CSS (CDN) -->
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+  <!-- Conteúdo do site -->
+  <div class="container mt-5">
+    <h1 class="text-center">Conversor dolar/real (PTAX)</h1>
+    <p class="lead text-center">Site destinado para converter Dólar em Real usando o PTAX, taxa do último dia útil segundo o banco central.</p>
+    
+    <div class="row justify-content-center my-4">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <h5 class="card-title">Conversor Dolar ($) para Real (R$)</h5>
+            <div class="form-group">
+              <label for="userInput">Insira seu valor no campo abaixo</label>
+              <input class="form-control" type="number" placeholder="1.00" step="0.01" min="0" id="moneyInput" placeholder="Insira " />
+            </div>
+            <button class="btn btn-primary" onclick="convertToReal()">Converter para Real (R$)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row justify-content-center" id="loading" hidden>
+      <p>Carregando...</p>
+    </div>
+
+    <table class="table table-bordered" id="historyTable" hidden>
+      <thead>
+        <tr>
+          <th>Histórico</th>
+          <th>Cotação</th>
+          <th>Dólar</th>
+          <th>Real</th>
+        </tr>
+      </thead>
+      <tbody class="table-group-divider"></tbody>
+        <tr>
+          <td></td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  
+  
+  <!-- Display result -->
+  <p id="result"></p>
+
+  <script>
+    // Função para construir a URL com os parâmetros de query
+    function buildQueryString(params) {
+      const searchParams = new URLSearchParams(params);
+      return searchParams.toString(); // Converte o objeto para a string de query
+    }
+
+    function getTodaysDate(){
+      return new Date();
+    }
+
+    function getYesterdayUsefulDate(reference_date){
+      const yesterday = new Date(reference_date);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      // Loop para garantir que o dia seja útil (não sábado nem domingo)
+      while (yesterday.getDay() === 0 || yesterday.getDay() === 6) {
+        yesterday.setDate(yesterday.getDate() - 1); // Retrocede um dia até ser útil
+      }
+
+      return yesterday;
+    }
+
+    function convertDateToString(date){
+      const month = String(date.getMonth() + 1).padStart(2, '0'); // MM
+      const day = String(date.getDate()).padStart(2, '0'); // DD
+      const year = date.getFullYear(); // YYYY
+      
+      return `'${month}-${day}-${year}'`;
+    }
+
+    function deleteAllRowsExceptHeader(tableElement) {
+      const rows = tableElement.rows;
+
+      for (let i = rows.length - 1; i > 0; i--)
+        tableElement.deleteRow(i);
+    }
+
+    function addRow(tableElement, history, dolarYoday, dolar, real) {
+      const tableBody = document.querySelector("tbody");
+
+      const newRow = document.createElement("tr");
+
+      const historyCell = document.createElement("td");
+      const dolarYodayCell = document.createElement("td");
+      const dolarCell = document.createElement("td");
+      const realCell = document.createElement("td");
+
+      historyCell.textContent = history;
+      dolarYodayCell.textContent = dolarYoday;
+      dolarCell.textContent = dolar;
+      realCell.textContent = real;
+
+      newRow.appendChild(historyCell);
+      newRow.appendChild(dolarYodayCell);
+      newRow.appendChild(dolarCell);
+      newRow.appendChild(realCell);
+
+      tableBody.appendChild(newRow);
+    }
+
+    function convertToReal(){
+      const loadingElement = document.getElementById('loading');
+      const tableElement = document.getElementById('historyTable');
+
+      const moneyInput = document.getElementById('moneyInput').value;
+      const today = getTodaysDate();
+      const yesterday = getYesterdayUsefulDate(today);
+      const baseUrl = "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)"
+      const queryParams = {
+        "@dataInicial": convertDateToString(yesterday),
+        "@dataFinalCotacao": convertDateToString(today),
+        "$top": 100,
+        "$format": "json",
+        "$select": "cotacaoCompra,cotacaoVenda,dataHoraCotacao"
+      }
+      const finalUrl = `${baseUrl}?${buildQueryString(queryParams)}`;
+      if(!moneyInput) {
+        confirm("Valor não inserido");
+        return;
+      }
+
+      loadingElement.hidden = true;
+      tableElement.hidden = true;
+
+      fetch(finalUrl)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Erro na requisição!');
+          }
+          return response.json();
+        })
+        .then(data => {
+          tableElement.hidden = false;
+          loadingElement.hidden = true;
+
+          deleteAllRowsExceptHeader(tableElement);
+
+          data.value.reverse().forEach((object) => {
+            const moneyInputDecimal = new Decimal(moneyInput)
+            const convertedValue = (new Decimal(object.cotacaoVenda)).times(moneyInputDecimal);
+            const tdHistoryDate = new Date(object.dataHoraCotacao);
+
+            const tdConvertedValue = new Intl.NumberFormat('pt-BR', {
+                                                                      style: 'currency',
+                                                                      currency: 'BRL'
+                                                                    }).format(convertedValue)
+            const tdInputValue = new Intl.NumberFormat('pt-BR', {
+                                                                  style: 'currency',
+                                                                  currency: 'USD'
+                                                                }).format(moneyInputDecimal)
+
+            addRow(tableElement, tdHistoryDate.toLocaleString(), `US$ ${object.cotacaoVenda}`, tdInputValue, tdConvertedValue);
+          });
+        })
+        .catch(error => {
+          console.error('Erro ao fazer a requisição:', error);
+        });
+
+        loadingElement.hidden = false;
+    }
+  </script>
+  <!-- Bootstrap JS e Popper.js (CDN) -->
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.3/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/decimal.js/10.3.1/decimal.min.js"></script>
+</body>
+</html>
